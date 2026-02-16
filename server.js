@@ -22,26 +22,33 @@ function saveLogs(logs) {
     fs.writeFileSync(LOG_FILE, JSON.stringify(logs, null, 2));
 }
 
-function addLog(action, status) {
+function addLog(action, status, responseTime = null) {
     let logs = loadLogs();
 
     logs.unshift({
         time: new Date().toLocaleString(),
         action,
-        status
+        status,
+        responseTime
     });
 
     logs = logs.slice(0, 100);
     saveLogs(logs);
 }
 
-/* ---------------- CHECK SITE STATUS ---------------- */
+/* ---------------- HEALTH CHECK ---------------- */
 
 async function isSiteDown() {
+    const start = Date.now();
     try {
         const response = await axios.get(SITE_URL, { timeout: 10000 });
+        const responseTime = Date.now() - start;
+
+        addLog("Health Check", "SUCCESS", responseTime);
+
         return response.status >= 400;
-    } catch (err) {
+    } catch {
+        addLog("Health Check", "ERROR", null);
         return true;
     }
 }
@@ -51,10 +58,7 @@ async function isSiteDown() {
 async function callRestore() {
     const down = await isSiteDown();
 
-    if (!down) {
-        addLog("Health Check", "SITE OK");
-        return;
-    }
+    if (!down) return;
 
     try {
         await axios.get(RESTORE_URL);
@@ -64,7 +68,7 @@ async function callRestore() {
     }
 }
 
-/* ---------------- CLEAR CACHE ---------------- */
+/* ---------------- CACHE ---------------- */
 
 async function clearCache() {
     try {
@@ -78,6 +82,7 @@ async function clearCache() {
 /* ---------------- DASHBOARD ---------------- */
 
 app.get("/", async (req, res) => {
+
     const logs = loadLogs();
     const down = await isSiteDown();
 
@@ -88,6 +93,9 @@ app.get("/", async (req, res) => {
         ? ((successCount / logs.length) * 100).toFixed(1)
         : 100;
 
+    const chartLabels = logs.slice(0, 20).reverse().map(l => l.time);
+    const chartData = logs.slice(0, 20).reverse().map(l => l.status === "SUCCESS" ? 1 : 0);
+
     res.send(`
 <!DOCTYPE html>
 <html>
@@ -96,12 +104,13 @@ app.get("/", async (req, res) => {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Temple Enterprise Monitor</title>
 <meta http-equiv="refresh" content="30">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{
 font-family:Segoe UI;
-background:linear-gradient(135deg,#0f2027,#203a43,#2c5364);
+background:linear-gradient(135deg,#141e30,#243b55);
 color:#333;
 }
 .container{
@@ -114,17 +123,14 @@ text-align:center;
 color:white;
 margin-bottom:30px;
 }
-.header h1{
-font-size:28px;
-}
-.status-badge{
+.status{
 display:inline-block;
 padding:8px 15px;
 border-radius:20px;
-font-size:14px;
 margin-top:10px;
 background:${down ? "#e74c3c" : "#27ae60"};
 color:white;
+font-size:14px;
 }
 .cards{
 display:flex;
@@ -138,62 +144,40 @@ min-width:250px;
 background:white;
 padding:20px;
 border-radius:12px;
-box-shadow:0 8px 20px rgba(0,0,0,0.15);
+box-shadow:0 6px 20px rgba(0,0,0,0.2);
 }
-.card h3{
-color:#888;
-font-size:14px;
-margin-bottom:10px;
-}
-.card p{
-font-size:24px;
-font-weight:bold;
-}
+.card h3{color:#777;font-size:14px;margin-bottom:10px;}
+.card p{font-size:24px;font-weight:bold;}
 .green{color:#27ae60;}
 .red{color:#e74c3c;}
-.actions{
-margin-bottom:20px;
-}
+.actions{margin-bottom:20px;}
 .btn{
 display:inline-block;
-padding:10px 20px;
+padding:10px 18px;
 border-radius:8px;
 text-decoration:none;
 color:white;
-font-weight:500;
 margin-right:10px;
 }
-.btn-restore{background:#3498db;}
-.btn-cache{background:#9b59b6;}
+.restore{background:#3498db;}
+.cache{background:#9b59b6;}
+.chart-box{
+background:white;
+padding:20px;
+border-radius:12px;
+margin-bottom:20px;
+}
 .table-wrapper{
 background:white;
 border-radius:12px;
 overflow:hidden;
-box-shadow:0 8px 20px rgba(0,0,0,0.15);
 }
-table{
-width:100%;
-border-collapse:collapse;
-}
-th,td{
-padding:12px;
-font-size:14px;
-}
-th{
-background:#f4f4f4;
-}
-tr:nth-child(even){
-background:#fafafa;
-}
-.footer{
-text-align:center;
-color:white;
-margin-top:20px;
-font-size:13px;
-}
+table{width:100%;border-collapse:collapse;}
+th,td{padding:12px;font-size:13px;}
+th{background:#f4f4f4;}
+tr:nth-child(even){background:#fafafa;}
 @media(max-width:768px){
 .cards{flex-direction:column;}
-th,td{font-size:12px;}
 }
 </style>
 </head>
@@ -204,9 +188,7 @@ th,td{font-size:12px;}
 
 <div class="header">
 <h1>Temple Adventures Enterprise Monitor</h1>
-<div class="status-badge">
-${down ? "SITE DOWN" : "SITE LIVE"}
-</div>
+<div class="status">${down ? "SITE DOWN" : "SITE LIVE"}</div>
 <p>Auto Restore: 5 mins | Auto Cache Clear: 1 hour</p>
 </div>
 
@@ -217,7 +199,7 @@ ${down ? "SITE DOWN" : "SITE LIVE"}
 </div>
 
 <div class="card">
-<h3>Successful Actions</h3>
+<h3>Success</h3>
 <p class="green">${successCount}</p>
 </div>
 
@@ -233,8 +215,13 @@ ${down ? "SITE DOWN" : "SITE LIVE"}
 </div>
 
 <div class="actions">
-<a href="/run-now" class="btn btn-restore">Run Restore Now</a>
-<a href="/clear-cache" class="btn btn-cache">Clear Cache Now</a>
+<a href="/run-now" class="btn restore">Run Restore</a>
+<a href="/clear-cache" class="btn cache">Clear Cache</a>
+</div>
+
+<div class="chart-box">
+<h3>Last 20 Checks</h3>
+<canvas id="uptimeChart"></canvas>
 </div>
 
 <div class="table-wrapper">
@@ -243,6 +230,7 @@ ${down ? "SITE DOWN" : "SITE LIVE"}
 <th>Time</th>
 <th>Action</th>
 <th>Status</th>
+<th>Response Time</th>
 </tr>
 
 ${logs.map(log => `
@@ -252,17 +240,37 @@ ${logs.map(log => `
 <td style="color:${log.status === "ERROR" ? "#e74c3c" : "#27ae60"};font-weight:bold;">
 ${log.status}
 </td>
+<td>${log.responseTime ? log.responseTime + " ms" : "-"}</td>
 </tr>
 `).join("")}
 
 </table>
 </div>
 
-<div class="footer">
-Enterprise Monitoring System • Node.js • Render Ready
 </div>
 
-</div>
+<script>
+new Chart(document.getElementById('uptimeChart'), {
+type: 'line',
+data: {
+labels: ${JSON.stringify(chartLabels)},
+datasets: [{
+label: 'Success (1) / Error (0)',
+data: ${JSON.stringify(chartData)},
+tension: 0.3
+}]
+},
+options: {
+responsive: true,
+scales: {
+y: {
+min: 0,
+max: 1
+}
+}
+}
+});
+</script>
 
 </body>
 </html>
