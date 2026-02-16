@@ -102,7 +102,7 @@ app.get("/", async (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Temple Enterprise Monitor</title>
+    <title>Temple Monitor</title>
     <meta http-equiv="refresh" content="30">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -328,7 +328,7 @@ app.get("/", async (req, res) => {
 
     <div class="header">
         <div class="header-titles">
-            <h1>Temple Enterprise Monitor</h1>
+            <h1>Temple Monitor</h1>
             <p>Auto Restore: 5 mins | Auto Cache Clear: 1 hour</p>
         </div>
         <div class="status-container">
@@ -481,3 +481,4 @@ clearCache();
 app.listen(PORT, () => {
     console.log("Enterprise Monitor Running on Port " + PORT);
 });
+
